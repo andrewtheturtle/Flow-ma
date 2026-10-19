@@ -128,7 +128,11 @@ qsub_cmd = function(script.fn, queue = NULL, jname = NULL, jlabel = NULL, jgroup
         current_umask = Sys.umask(mode = NA)
         out_cmd = paste(out_cmd, " -wd ", cwd )
         Sys.umask(mode = "0002")
-        base::file.create(trimws(paste0(cwd, "/", qjout)))
+        ## only create missing job logs: re-creating existing ones truncated the
+        ## scheduler's output log on every update() / Job() call
+        job.out = trimws(paste0(cwd, "/", qjout))
+        job.out = job.out[!file.exists(job.out)]
+        if (length(job.out)) base::file.create(job.out)
         Sys.umask(mode = current_umask)
         ## cmds = sprintf("umask 002; touch %s", paste0(cwd, "/", qjout))
         ## lapply(cmds, function(this_cmd) {system(this_cmd); return(NULL)})
@@ -200,7 +204,11 @@ ssub_cmd = function(script.fn, queue, qos = NULL, jname = NULL, jlabel = NULL, j
         current_umask = Sys.umask(mode = NA)
         out_cmd = paste0(out_cmd, " --chdir=", cwd)
         Sys.umask(mode = "0002")
-        base::file.create(trimws(paste0(cwd, "/", qjout)))
+        ## only create missing job logs: re-creating existing ones truncated the
+        ## scheduler's output log on every update() / Job() call
+        job.out = trimws(paste0(cwd, "/", qjout))
+        job.out = job.out[!file.exists(job.out)]
+        if (length(job.out)) base::file.create(job.out)
         Sys.umask(mode = current_umask)
         ## cmds = sprintf("umask 002; touch %s", paste0(cwd, "/", qjout))
         ## lapply(cmds, function(this_cmd) {system(this_cmd); return(NULL)})
