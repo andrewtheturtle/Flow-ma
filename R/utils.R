@@ -225,6 +225,34 @@ ssub_cmd = function(script.fn, queue, qos = NULL, jname = NULL, jlabel = NULL, j
 }
 
 
+## last n lines of a file without forking `tail`: read growing chunks from the end
+.tail_lines = function(f, n = 100, chunk = 65536)
+{
+    sz = suppressWarnings(file.size(f))
+    if (is.na(sz) || sz == 0)
+        return(character(0))
+    con = file(f, 'rb')
+    on.exit(close(con))
+    repeat {
+        start = max(0, sz - chunk)
+        seek(con, start)
+        y = readLines(con, warn = FALSE, skipNul = TRUE)
+        if (start == 0 || length(y) > n)
+            break
+        chunk = chunk * 4
+    }
+    if (start > 0)
+        y = y[-1] ## first line may be partial
+    utils::tail(y, n)
+}
+
+## first n lines of a file without forking `head`
+.head_lines = function(f, n = 100)
+{
+    tryCatch(suppressWarnings(readLines(f, n = n, warn = FALSE, skipNul = TRUE)),
+             error = function(e) character(0))
+}
+
 
 #' @name parse.info
 #' @title parse.info
@@ -290,12 +318,10 @@ parse.info = function(jname, detailed = FALSE, force = FALSE, mc.cores = 1)
 
     tmp = matrix(unlist(mclapply(which(fn.ex),
         function(i){
-            p = pipe(paste('tail -n 100', fn[i]))
-            y = readLines(p);
-            close(p)
-            p = pipe(paste('head -n 100', fn[i]))
-            sge = grep('FLOW', readLines(p), value = TRUE)
-            close(p)
+            ## read head / tail in R: forking `tail` / `head` per job (~15 ms each)
+            ## dominated report() on Jobs without cached .bsub.report files
+            y = .tail_lines(fn[i], 100)
+            sge = grep('FLOW', .head_lines(fn[i], 100), value = TRUE)
             if (any(grepl('^Sender.*LSF System', y))){   ## LSF job
                 y = split(y, cumsum(grepl('^Sender', y)))
                 y = y[[length(y)]]  ## picks "last" dump from lsf to this out file
@@ -413,9 +439,11 @@ parse.info = function(jname, detailed = FALSE, force = FALSE, mc.cores = 1)
 
     ## cache row slices of this report table in the output directories
     ## for easier downstream access
-    for (i in which(fn.ex)){
+    ## (parallel: creating new files on GPFS is latency bound, ~0.1 s per file)
+    mclapply(which(fn.ex), function(i) {
         write.table(outs[i, ], fn.report[i], sep = '\t', quote = F, row.names = FALSE)
-    }
+        NULL
+    }, mc.cores = mc.cores)
 
     outs = as.data.table(outs)
 
