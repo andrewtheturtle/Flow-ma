@@ -1378,6 +1378,35 @@ setMethod('update', 'Job', function(object, check.inputs = TRUE, check.stamps = 
           outre.dn = dirname(outre)
           outre.fn = basename(outre)
           outre.dn[outre.dn == '.'] = ''
+          if (!parse_recursive)
+          {
+            ## fast path: list each job dir once, match all patterns in memory,
+            ## then assign each output column in a single call
+            ## (per-id data.table subsets / assignments dominated update() runtime)
+            od = new.object@runinfo$outdir[match(ids, new.object@runinfo[[data.table::key(new.object@runinfo)]])]
+            matched = lapply(od, function(this.od) {
+              this.dir = unique(gsub('\\/$', '', gsub('\\\\', '', paste(this.od, outre.dn, sep = '/'))))
+              files = dir(this.dir, recursive = FALSE, full = TRUE)
+              if (!length(files))
+                return(NULL)
+              fn = basename(files)
+              vapply(outre.fn, function(re) files[grep(re, fn)][1], character(1), USE.NAMES = FALSE)
+            })
+            has.files = !vapply(matched, is.null, logical(1))
+            if (any(has.files))
+            {
+              matched = do.call(rbind, matched[has.files])
+              outs = data.table::copy(new.object@outputs)
+              for (k in seq_along(outkeys))
+              {
+                col = as.character(outs[[outkeys[k]]])
+                col[has.files] = matched[, k]
+                outs[, eval(outkeys[k]) := col]
+              }
+              new.object@outputs = outs
+            }
+          }
+          else
           for (id in ids)
           {
             this.dir = gsub('\\/$', '', gsub('\\\\', '', paste(new.object@runinfo[id, outdir], outre.dn, sep = '/')))
